@@ -20,6 +20,17 @@ export default function PDFViewer() {
   const canvasRef = useRef(null);
   const renderTaskRef = useRef(null);
   const fileInputRef = useRef(null);
+  const utteranceRef = useRef(null);
+
+  // Preload voices
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+  }, []);
 
   // Load PDF.js script dynamically if not already present
   useEffect(() => {
@@ -251,17 +262,59 @@ export default function PDFViewer() {
       return;
     }
 
-    const textToRead = extractedText || `Leyendo página ${pageNum} de ${docTitle}`;
-    const utterance = new SpeechSynthesisUtterance(textToRead);
-    utterance.lang = 'es-ES';
-    utterance.rate = ttsRate;
-
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
+    const textToRead = (extractedText && extractedText.trim().length > 0)
+      ? extractedText
+      : `Página ${pageNum} de ${docTitle}. Lectura de documento asistida.`;
 
     window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
-    setIsSpeaking(true);
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+
+    setTimeout(() => {
+      try {
+        const utterance = new SpeechSynthesisUtterance(textToRead);
+        utteranceRef.current = utterance;
+        window.__activeUtterance = utterance; // Evita el bug de Garbage Collection en V8
+
+        const voices = window.speechSynthesis.getVoices();
+        const spanishVoice = voices.find(v => v.lang.toLowerCase().startsWith('es') || v.name.toLowerCase().includes('spanish'))
+                          || voices.find(v => v.default)
+                          || voices[0];
+
+        if (spanishVoice) {
+          utterance.voice = spanishVoice;
+          utterance.lang = spanishVoice.lang;
+        } else {
+          utterance.lang = 'es-ES';
+        }
+
+        utterance.rate = ttsRate;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+
+        utterance.onstart = () => setIsSpeaking(true);
+        utterance.onend = () => {
+          setIsSpeaking(false);
+          utteranceRef.current = null;
+        };
+        utterance.onerror = (e) => {
+          console.warn('[TTS] Error o interrupción:', e);
+          setIsSpeaking(false);
+          utteranceRef.current = null;
+        };
+
+        window.speechSynthesis.speak(utterance);
+        setIsSpeaking(true);
+
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+      } catch (err) {
+        console.error('Error al iniciar lectura por voz:', err);
+        setIsSpeaking(false);
+      }
+    }, 60);
   };
 
   // Navigation handlers

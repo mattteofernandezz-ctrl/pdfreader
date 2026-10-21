@@ -57,33 +57,90 @@ export default function Home() {
     }
   };
 
+  // Referencia para evitar que el Garbage Collector de Chrome corte la voz
+  const utteranceRef = useRef(null);
+
+  // Precargar voces del navegador
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+    return () => {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
   // TTS functions
   const handleTTSPlay = () => {
-    if (!ttsText.trim()) return;
+    const text = ttsText.trim();
+    if (!text) return;
     
+    if (!window.speechSynthesis) {
+      alert('Tu navegador no soporta síntesis de voz (Web Speech API).');
+      return;
+    }
+
     if (isSpeaking) {
       window.speechSynthesis.cancel();
       setIsSpeaking(false);
       return;
     }
 
-    const utterance = new SpeechSynthesisUtterance(ttsText);
-    utterance.lang = 'es-ES';
-    utterance.rate = ttsRate;
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-    
     window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
-    setIsSpeaking(true);
-  };
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
 
-  // Cleanup TTS on unmount
-  useEffect(() => {
-    return () => {
-      window.speechSynthesis.cancel();
-    };
-  }, []);
+    setTimeout(() => {
+      try {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utteranceRef.current = utterance;
+        window.__activeUtterance = utterance; // Evita recolector de basura V8
+
+        const voices = window.speechSynthesis.getVoices();
+        const spanishVoice = voices.find(v => v.lang.toLowerCase().startsWith('es') || v.name.toLowerCase().includes('spanish'))
+                          || voices.find(v => v.default)
+                          || voices[0];
+        
+        if (spanishVoice) {
+          utterance.voice = spanishVoice;
+          utterance.lang = spanishVoice.lang;
+        } else {
+          utterance.lang = 'es-ES';
+        }
+
+        utterance.rate = ttsRate;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+
+        utterance.onstart = () => setIsSpeaking(true);
+        utterance.onend = () => {
+          setIsSpeaking(false);
+          utteranceRef.current = null;
+        };
+        utterance.onerror = (e) => {
+          console.warn('[TTS] Error o interrupción:', e);
+          setIsSpeaking(false);
+          utteranceRef.current = null;
+        };
+
+        window.speechSynthesis.speak(utterance);
+        setIsSpeaking(true);
+
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+      } catch (err) {
+        console.error('Error al iniciar TTS:', err);
+        setIsSpeaking(false);
+      }
+    }, 60);
+  };
 
   // Accesibilidad: Cerrar modal con Escape
   useEffect(() => {
