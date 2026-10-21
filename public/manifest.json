@@ -1,0 +1,19 @@
+{
+  "short_name": "PDFReader",
+  "name": "PDFReader — Lectura y Audio Accesible",
+  "description": "Aplicación Web Progresiva para lectura accesible de documentos PDF, audiolibros y síntesis de voz.",
+  "icons": [
+    {
+      "src": "./favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "./",
+  "display": "standalone",
+  "theme_color": "#10002B",
+  "background_color": "#10002B",
+  "orientation": "portrait-primary",
+  "categories": ["education", "books", "productivity"]
+}

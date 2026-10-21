@@ -1,0 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300,0,0');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg: #10002B;
+    --card: #240046;
+    --primary: #8B5CF6;
+    --text: #E0E0E0;
+    --icon: #E0AAFF;
+    --error-base: #240046;
+    --error: #c5273b;
+  }
+  
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Sora', system-ui, Segoe UI, Roboto, -apple-system;
+  }
+}
+
+@layer components {
+  .surface { background-color: var(--card); }
+  .icon-var { color: var(--icon); }
+  .card { background-color: rgba(255, 255, 255, 0.03); backdrop-filter: blur(6px); }
+  .accent { background-color: var(--primary); color: white; }
+  
+  .input-error { 
+    border-color: var(--error); 
+    box-shadow: 0 0 0 3px rgba(197, 39, 59, 0.08); 
+  }
+  .error-text { 
+    color: var(--error); 
+    font-size: 0.9rem; 
+    margin-top: 0.35rem; 
+  }
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+}
+
+:focus { 
+  outline: 3px solid rgba(139, 92, 246, 0.18); 
+  outline-offset: 2px; 
+}
+
+.scroll-x::-webkit-scrollbar { height: 8px; }
+.scroll-x::-webkit-scrollbar-thumb { 
+  background: rgba(255, 255, 255, 0.08); 
+  border-radius: 999px; 
+}
