@@ -11,16 +11,23 @@ const THEMES = {
 
 export const ThemeProvider = ({ children }) => {
   const [currentMode, setCurrentMode] = useState(localStorage.getItem('librook_mode') || 'night');
+  const [bgDarkness, setBgDarkness] = useState(() => {
+    const saved = localStorage.getItem('librook_darkness');
+    return saved !== null ? Number(saved) : 50;
+  });
 
   useEffect(() => {
     const t = THEMES[currentMode] || THEMES.night;
     document.documentElement.style.setProperty('--bg', t.bg);
     document.documentElement.style.setProperty('--card', t.card);
     document.documentElement.style.setProperty('--primary', t.primary);
-    document.documentElement.style.setProperty('--text', t.text);
     document.documentElement.style.setProperty('--icon', t.icon);
     
-    // Adjust text contrast for Day mode
+    // Proporción de oscurecimiento manual para el overlay (0 a 0.70)
+    const dimRatio = (bgDarkness / 100) * 0.7;
+    document.documentElement.style.setProperty('--bg-dim', dimRatio);
+
+    // Ajustar contraste de texto
     if (currentMode === 'day') {
       document.documentElement.style.setProperty('--text', '#111827');
     } else {
@@ -28,10 +35,11 @@ export const ThemeProvider = ({ children }) => {
     }
 
     localStorage.setItem('librook_mode', currentMode);
-  }, [currentMode]);
+    localStorage.setItem('librook_darkness', bgDarkness);
+  }, [currentMode, bgDarkness]);
 
   return (
-    <ThemeContext.Provider value={{ currentMode, setCurrentMode }}>
+    <ThemeContext.Provider value={{ currentMode, setCurrentMode, bgDarkness, setBgDarkness }}>
       {children}
     </ThemeContext.Provider>
   );

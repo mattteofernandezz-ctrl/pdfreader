@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 
 export default function Home() {
-  const { currentMode, setCurrentMode } = useTheme();
+  const { currentMode, setCurrentMode, bgDarkness, setBgDarkness } = useTheme();
   const navigate = useNavigate();
   
   const [isThemePanelOpen, setIsThemePanelOpen] = useState(false);
@@ -14,10 +14,12 @@ export default function Home() {
   const [audioUrl, setAudioUrl] = useState('https://mcdn.podbean.com/mf/web/68kpmtuwn4nf2dm5/El_gato_con_botas_cuento_infantil_Cuentos_infantiles_en_Espa_ol60wrg.mp3');
   const audioRef = useRef(null);
 
-  // TTS state
+  // TTS state y referencias
   const [ttsText, setTtsText] = useState('');
   const [ttsRate, setTtsRate] = useState(1);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const utteranceRef = useRef(null);
+  const fallbackAudioRef = useRef(null);
 
   useEffect(() => {
     // Si la URL cambia o se inicializa
@@ -57,89 +59,129 @@ export default function Home() {
     }
   };
 
-  // Referencia para evitar que el Garbage Collector de Chrome corte la voz
-  const utteranceRef = useRef(null);
-
   // Precargar voces del navegador
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.getVoices();
-      window.speechSynthesis.onvoiceschanged = () => {
-        window.speechSynthesis.getVoices();
-      };
+    if (typeof window !== 'undefined') {
+      const synth = window.speechSynthesis || window.webkitSpeechSynthesis;
+      if (synth) {
+        synth.getVoices();
+        synth.onvoiceschanged = () => {
+          synth.getVoices();
+        };
+      }
     }
     return () => {
-      if (typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
+      if (typeof window !== 'undefined') {
+        const synth = window.speechSynthesis || window.webkitSpeechSynthesis;
+        if (synth) {
+          synth.cancel();
+        }
+      }
+      if (fallbackAudioRef.current) {
+        fallbackAudioRef.current.pause();
       }
     };
   }, []);
 
-  // TTS functions
+  // Función de respaldo mediante audio stream si el navegador no tiene Web Speech API nativa
+  const playFallbackAudio = (text) => {
+    try {
+      if (fallbackAudioRef.current) {
+        fallbackAudioRef.current.pause();
+      }
+      const cleanSnippet = encodeURIComponent(text.slice(0, 160));
+      const fallbackUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=es&client=tw-ob&q=${cleanSnippet}`;
+      const audio = new Audio(fallbackUrl);
+      fallbackAudioRef.current = audio;
+
+      setIsSpeaking(true);
+      audio.onended = () => setIsSpeaking(false);
+      audio.onerror = () => {
+        setIsSpeaking(false);
+        alert('La síntesis de voz nativa no está disponible en este navegador (por ejemplo, Firefox móvil o navegadores integrados de WhatsApp/Instagram). Te recomendamos abrir este enlace en Google Chrome o Microsoft Edge para disfrutar de lectura por voz sin restricciones.');
+      };
+      audio.play().catch(() => {
+        setIsSpeaking(false);
+        alert('Para habilitar la lectura por voz en este dispositivo, abre PDFReader directamente en Google Chrome o Microsoft Edge.');
+      });
+    } catch (e) {
+      setIsSpeaking(false);
+      alert('Para habilitar la lectura por voz en este dispositivo, abre PDFReader directamente en Google Chrome o Microsoft Edge.');
+    }
+  };
+
+  // TTS principal con blindaje V8 y fallback
   const handleTTSPlay = () => {
     const text = ttsText.trim();
     if (!text) return;
-    
-    if (!window.speechSynthesis) {
-      alert('Tu navegador no soporta síntesis de voz (Web Speech API).');
-      return;
-    }
+
+    const synth = typeof window !== 'undefined' ? (window.speechSynthesis || window.webkitSpeechSynthesis) : null;
+    const UtteranceClass = typeof window !== 'undefined' ? (window.SpeechSynthesisUtterance || window.webkitSpeechSynthesisUtterance) : null;
 
     if (isSpeaking) {
-      window.speechSynthesis.cancel();
+      if (synth) synth.cancel();
+      if (fallbackAudioRef.current) {
+        fallbackAudioRef.current.pause();
+      }
       setIsSpeaking(false);
       return;
     }
 
-    window.speechSynthesis.cancel();
-    if (window.speechSynthesis.paused) {
-      window.speechSynthesis.resume();
-    }
-
-    setTimeout(() => {
-      try {
-        const utterance = new SpeechSynthesisUtterance(text);
-        utteranceRef.current = utterance;
-        window.__activeUtterance = utterance; // Evita recolector de basura V8
-
-        const voices = window.speechSynthesis.getVoices();
-        const spanishVoice = voices.find(v => v.lang.toLowerCase().startsWith('es') || v.name.toLowerCase().includes('spanish'))
-                          || voices.find(v => v.default)
-                          || voices[0];
-        
-        if (spanishVoice) {
-          utterance.voice = spanishVoice;
-          utterance.lang = spanishVoice.lang;
-        } else {
-          utterance.lang = 'es-ES';
-        }
-
-        utterance.rate = ttsRate;
-        utterance.pitch = 1.0;
-        utterance.volume = 1.0;
-
-        utterance.onstart = () => setIsSpeaking(true);
-        utterance.onend = () => {
-          setIsSpeaking(false);
-          utteranceRef.current = null;
-        };
-        utterance.onerror = (e) => {
-          console.warn('[TTS] Error o interrupción:', e);
-          setIsSpeaking(false);
-          utteranceRef.current = null;
-        };
-
-        window.speechSynthesis.speak(utterance);
-        setIsSpeaking(true);
-
-        if (window.speechSynthesis.paused) {
-          window.speechSynthesis.resume();
-        }
-      } catch (err) {
-        console.error('Error al iniciar TTS:', err);
-        setIsSpeaking(false);
+    // Si el navegador soporta Web Speech API
+    if (synth && UtteranceClass) {
+      synth.cancel();
+      if (synth.paused) {
+        synth.resume();
       }
-    }, 60);
+
+      setTimeout(() => {
+        try {
+          const utterance = new UtteranceClass(text);
+          utteranceRef.current = utterance;
+          window.__activeUtterance = utterance; // Evita recolector de basura V8
+
+          const voices = synth.getVoices();
+          const spanishVoice = voices.find(v => v.lang.toLowerCase().startsWith('es') || v.name.toLowerCase().includes('spanish'))
+                            || voices.find(v => v.default)
+                            || voices[0];
+          
+          if (spanishVoice) {
+            utterance.voice = spanishVoice;
+            utterance.lang = spanishVoice.lang;
+          } else {
+            utterance.lang = 'es-ES';
+          }
+
+          utterance.rate = ttsRate;
+          utterance.pitch = 1.0;
+          utterance.volume = 1.0;
+
+          utterance.onstart = () => setIsSpeaking(true);
+          utterance.onend = () => {
+            setIsSpeaking(false);
+            utteranceRef.current = null;
+          };
+          utterance.onerror = (e) => {
+            console.warn('[TTS] Error o interrupción:', e);
+            setIsSpeaking(false);
+            utteranceRef.current = null;
+          };
+
+          synth.speak(utterance);
+          setIsSpeaking(true);
+
+          if (synth.paused) {
+            synth.resume();
+          }
+        } catch (err) {
+          console.error('Error al iniciar TTS nativo, usando respaldo:', err);
+          playFallbackAudio(text);
+        }
+      }, 60);
+    } else {
+      // Fallback automático cuando synth es undefined
+      playFallbackAudio(text);
+    }
   };
 
   // Accesibilidad: Cerrar modal con Escape
@@ -184,11 +226,8 @@ export default function Home() {
       {/* CONTENIDO HOME */}
       <section className="p-4" aria-labelledby="homeTitle">
         <div className="max-w-xl mx-auto">
-          <header className="flex items-center justify-between mb-4">
+          <header className="mb-4">
             <h2 id="homeTitle" className="font-bold text-xl">Lectura y Audio</h2>
-            <button onClick={() => setIsThemePanelOpen(true)} className="p-2 rounded-full surface" title="Apariencia mini">
-              <span className="material-symbols-outlined">palette</span>
-            </button>
           </header>
 
           <div className="card p-4 rounded-xl mb-6 flex gap-4">
@@ -329,7 +368,7 @@ export default function Home() {
                 <button className="w-10 h-10 surface rounded-full flex items-center justify-center">
                   <span className="material-symbols-outlined icon-var">dark_mode</span>
                 </button>
-                <p>Noche púrpura</p>
+                <p>Noche</p>
               </div>
               <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setCurrentMode('day'); setIsThemePanelOpen(false); }}>
                 <button className="w-10 h-10 surface rounded-full flex items-center justify-center">
@@ -351,9 +390,21 @@ export default function Home() {
               </div>
               
               <div className="pt-2">
-                <label className="block text-sm font-medium mb-1">Ajuste manual</label>
-                <input type="range" min="0" max="100" defaultValue="55" className="w-full" aria-label="Ajuste manual de oscurecimiento"/>
-                <div className="text-xs opacity-70 mt-1">Ajusta la oscuridad del fondo</div>
+                <div className="flex justify-between items-center mb-1">
+                  <label htmlFor="manualBgDarkness" className="text-sm font-medium">Ajuste manual</label>
+                  <span className="text-xs opacity-75 font-semibold">{bgDarkness}%</span>
+                </div>
+                <input 
+                  id="manualBgDarkness"
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value={bgDarkness} 
+                  onChange={(e) => setBgDarkness(Number(e.target.value))}
+                  className="w-full accent-indigo-500 cursor-pointer" 
+                  aria-label="Ajuste manual de oscurecimiento del fondo"
+                />
+                <div className="text-xs opacity-70 mt-1">Ajusta la oscuridad del fondo en tiempo real</div>
               </div>
             </div>
           </div>

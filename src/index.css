@@ -14,12 +14,24 @@
     --icon: #E0AAFF;
     --error-base: #240046;
     --error: #c5273b;
+    --bg-dim: 0.35;
   }
   
   body {
     background: var(--bg);
     color: var(--text);
     font-family: 'Sora', system-ui, Segoe UI, Roboto, -apple-system;
+    transition: background-color 0.25s ease;
+  }
+
+  #bg-overlay {
+    position: fixed;
+    inset: 0;
+    background-color: #000000;
+    opacity: var(--bg-dim, 0.35);
+    pointer-events: none;
+    z-index: 0;
+    transition: opacity 0.15s ease-out;
   }
 }
 

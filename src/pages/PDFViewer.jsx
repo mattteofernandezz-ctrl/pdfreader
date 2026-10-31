@@ -119,6 +119,7 @@ export default function PDFViewer() {
 
   /** @type {React.MutableRefObject<SpeechSynthesisUtterance|null>} Instancia persistente para evitar GC de V8 */
   const utteranceRef = useRef(null);
+  const fallbackAudioRef = useRef(null);
 
   // --------------------------------------------------------------------------
   // EFECTOS SECUNDARIOS (Hooks de Inicialización)
@@ -128,12 +129,20 @@ export default function PDFViewer() {
    * Precarga de voces del sistema operativo para evitar retrasos en el primer clic de voz.
    */
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.getVoices();
-      window.speechSynthesis.onvoiceschanged = () => {
-        window.speechSynthesis.getVoices();
-      };
+    if (typeof window !== 'undefined') {
+      const synth = window.speechSynthesis || window.webkitSpeechSynthesis;
+      if (synth) {
+        synth.getVoices();
+        synth.onvoiceschanged = () => {
+          synth.getVoices();
+        };
+      }
     }
+    return () => {
+      if (fallbackAudioRef.current) {
+        fallbackAudioRef.current.pause();
+      }
+    };
   }, []);
 
   /**
@@ -413,78 +422,111 @@ export default function PDFViewer() {
    * Cumple con RF-004 y RNF-001 (Lectura inclusiva).
    */
   const toggleReadAloud = () => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) {
-      alert('Tu navegador web no soporta la síntesis de voz (Web Speech API).');
-      return;
-    }
+    const synth = typeof window !== 'undefined' ? (window.speechSynthesis || window.webkitSpeechSynthesis) : null;
+    const UtteranceClass = typeof window !== 'undefined' ? (window.SpeechSynthesisUtterance || window.webkitSpeechSynthesisUtterance) : null;
 
     // Si ya está hablando, se detiene inmediatamente
     if (isSpeaking) {
-      window.speechSynthesis.cancel();
+      if (synth) synth.cancel();
+      if (fallbackAudioRef.current) {
+        fallbackAudioRef.current.pause();
+      }
       setIsSpeaking(false);
       return;
     }
 
     const textToRead = (extractedText && extractedText.trim().length > 0)
       ? extractedText
-      : `Página ${pageNum} de ${docTitle}. Documento sin texto legible por el sintetizador.`;
+      : `Página ${pageNum} de ${docTitle}.`;
 
-    // Limpieza de cola previa
-    window.speechSynthesis.cancel();
-    if (window.speechSynthesis.paused) {
-      window.speechSynthesis.resume();
-    }
-
-    // Pequeño retardo para asegurar que cancel() finalizó en Chromium
-    setTimeout(() => {
-      try {
-        const utterance = new SpeechSynthesisUtterance(textToRead);
-        
-        // Blindaje contra recolección de basura
-        utteranceRef.current = utterance;
-        window.__activeUtterance = utterance;
-
-        // Búsqueda inteligente de voz en español
-        const voices = window.speechSynthesis.getVoices();
-        const spanishVoice = voices.find((v) => v.lang.toLowerCase().startsWith('es') || v.name.toLowerCase().includes('spanish'))
-                          || voices.find((v) => v.default)
-                          || voices[0];
-
-        if (spanishVoice) {
-          utterance.voice = spanishVoice;
-          utterance.lang = spanishVoice.lang;
-        } else {
-          utterance.lang = 'es-ES';
-        }
-
-        utterance.rate = ttsRate;
-        utterance.pitch = 1.0;
-        utterance.volume = 1.0;
-
-        utterance.onstart = () => setIsSpeaking(true);
-        utterance.onend = () => {
-          setIsSpeaking(false);
-          utteranceRef.current = null;
-          window.__activeUtterance = null;
-        };
-        utterance.onerror = (e) => {
-          console.warn('[PDFViewer TTS] Evento de error o cancelación:', e);
-          setIsSpeaking(false);
-          utteranceRef.current = null;
-          window.__activeUtterance = null;
-        };
-
-        window.speechSynthesis.speak(utterance);
-        setIsSpeaking(true);
-
-        if (window.speechSynthesis.paused) {
-          window.speechSynthesis.resume();
-        }
-      } catch (err) {
-        console.error('[PDFViewer] Error al ejecutar síntesis de voz:', err);
-        setIsSpeaking(false);
+    // Si el navegador soporta Web Speech API
+    if (synth && UtteranceClass) {
+      // Limpieza de cola previa
+      synth.cancel();
+      if (synth.paused) {
+        synth.resume();
       }
-    }, 60);
+
+      // Pequeño retardo para asegurar que cancel() finalizó en Chromium
+      setTimeout(() => {
+        try {
+          const utterance = new UtteranceClass(textToRead);
+          
+          // Blindaje contra recolección de basura
+          utteranceRef.current = utterance;
+          window.__activeUtterance = utterance;
+
+          // Búsqueda inteligente de voz en español
+          const voices = synth.getVoices();
+          const spanishVoice = voices.find((v) => v.lang.toLowerCase().startsWith('es') || v.name.toLowerCase().includes('spanish'))
+                            || voices.find((v) => v.default)
+                            || voices[0];
+
+          if (spanishVoice) {
+            utterance.voice = spanishVoice;
+            utterance.lang = spanishVoice.lang;
+          } else {
+            utterance.lang = 'es-ES';
+          }
+
+          utterance.rate = ttsRate;
+          utterance.pitch = 1.0;
+          utterance.volume = 1.0;
+
+          utterance.onstart = () => setIsSpeaking(true);
+          utterance.onend = () => {
+            setIsSpeaking(false);
+            utteranceRef.current = null;
+            window.__activeUtterance = null;
+          };
+          utterance.onerror = (e) => {
+            console.warn('[PDFViewer TTS] Evento de error o cancelación:', e);
+            setIsSpeaking(false);
+            utteranceRef.current = null;
+            window.__activeUtterance = null;
+          };
+
+          synth.speak(utterance);
+          setIsSpeaking(true);
+
+          if (synth.paused) {
+            synth.resume();
+          }
+        } catch (err) {
+          console.error('[PDFViewer] Error al ejecutar síntesis de voz, usando respaldo:', err);
+          playFallbackPdfAudio(textToRead);
+        }
+      }, 60);
+    } else {
+      // Fallback para navegadores sin Web Speech API
+      playFallbackPdfAudio(textToRead);
+    }
+  };
+
+  const playFallbackPdfAudio = (textToRead) => {
+    try {
+      if (fallbackAudioRef.current) {
+        fallbackAudioRef.current.pause();
+      }
+      const cleanSnippet = encodeURIComponent(textToRead.slice(0, 160));
+      const fallbackUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=es&client=tw-ob&q=${cleanSnippet}`;
+      const audio = new Audio(fallbackUrl);
+      fallbackAudioRef.current = audio;
+
+      setIsSpeaking(true);
+      audio.onended = () => setIsSpeaking(false);
+      audio.onerror = () => {
+        setIsSpeaking(false);
+        alert('La síntesis de voz nativa no está disponible en este navegador (por ejemplo, Firefox móvil o navegadores integrados de redes sociales). Para leer tus documentos PDF por voz, te recomendamos abrir esta página en Google Chrome o Microsoft Edge.');
+      };
+      audio.play().catch(() => {
+        setIsSpeaking(false);
+        alert('Para habilitar la lectura por voz de documentos PDF, abre PDFReader directamente en Google Chrome o Microsoft Edge.');
+      });
+    } catch (e) {
+      setIsSpeaking(false);
+      alert('Para habilitar la lectura por voz de documentos PDF, abre PDFReader directamente en Google Chrome o Microsoft Edge.');
+    }
   };
 
   /**

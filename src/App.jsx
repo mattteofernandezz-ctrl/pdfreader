@@ -10,8 +10,9 @@ import PDFViewer from './pages/PDFViewer';
 function App() {
   return (
     <ThemeProvider>
+      <div id="bg-overlay" aria-hidden="true" />
       <HashRouter>
-        <div id="app" className="mx-auto min-h-screen relative pb-20">
+        <div id="app" className="mx-auto min-h-screen relative pb-20 z-10">
           <Routes>
             <Route path="/" element={<Navigate to="/login" replace />} />
             <Route path="/login" element={<Login />} />
