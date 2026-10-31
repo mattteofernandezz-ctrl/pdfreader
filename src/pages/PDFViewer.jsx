@@ -155,7 +155,13 @@ export default function PDFViewer() {
     const initializePdfEngine = async () => {
       if (window.pdfjsLib) {
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = CONFIG.PDFJS_WORKER_URL;
-        loadSampleDocument();
+        if (window.__pendingPdfData) {
+          const { data, name } = window.__pendingPdfData;
+          window.__pendingPdfData = null;
+          loadPdfFromUint8Array(data, name);
+        } else {
+          loadSampleDocument();
+        }
         return;
       }
 
@@ -166,7 +172,13 @@ export default function PDFViewer() {
         script.onload = () => {
           if (isMounted && window.pdfjsLib) {
             window.pdfjsLib.GlobalWorkerOptions.workerSrc = CONFIG.PDFJS_WORKER_URL;
-            loadSampleDocument();
+            if (window.__pendingPdfData) {
+              const { data, name } = window.__pendingPdfData;
+              window.__pendingPdfData = null;
+              loadPdfFromUint8Array(data, name);
+            } else {
+              loadSampleDocument();
+            }
           }
         };
         script.onerror = () => {
@@ -368,6 +380,46 @@ export default function PDFViewer() {
   // --------------------------------------------------------------------------
 
   /**
+   * Carga y procesa un documento PDF a partir de un ArrayBuffer / Uint8Array.
+   * Maneja inicialización asíncrona de PDF.js y control de errores.
+   */
+  const loadPdfFromUint8Array = async (typedarray, fileName) => {
+    setDocTitle(fileName || 'Documento PDF');
+    setLoading(true);
+    setStatusMessage('Cargando documento...');
+
+    const executeLoad = async () => {
+      try {
+        if (!window.pdfjsLib) {
+          throw new Error('PDF.js aún no está disponible');
+        }
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = CONFIG.PDFJS_WORKER_URL;
+        const loadingTask = window.pdfjsLib.getDocument({
+          data: typedarray,
+          cMapUrl: CONFIG.PDFJS_CMAPS_URL,
+          cMapPacked: true
+        });
+        const doc = await loadingTask.promise;
+        setPdfDoc(doc);
+        setNumPages(doc.numPages);
+        setPageNum(1);
+        setStatusMessage('');
+      } catch (err) {
+        console.error('[PDFViewer] Error al abrir el PDF local:', err);
+        alert('No fue posible abrir el documento seleccionado. Verifique que no esté corrupto o protegido.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (window.pdfjsLib) {
+      await executeLoad();
+    } else {
+      setTimeout(executeLoad, 750);
+    }
+  };
+
+  /**
    * Procesa la carga de archivos locales desde el equipo del usuario.
    * Valida tipo MIME (.pdf) y transfiere los bytes a PDF.js mediante FileReader.
    * Cumple con RF-002 (Carga de archivos locales).
@@ -376,9 +428,10 @@ export default function PDFViewer() {
    */
   const handleFileUpload = (e) => {
     const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // Permite volver a seleccionar el mismo archivo
     if (!file) return;
 
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+    if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
       alert('Formato no válido. Por favor selecciona un archivo con extensión .pdf.');
       return;
     }
@@ -388,25 +441,13 @@ export default function PDFViewer() {
     setStatusMessage('Procesando archivo local...');
 
     const fileReader = new FileReader();
-    fileReader.onload = async function () {
-      try {
-        const typedarray = new Uint8Array(this.result);
-        if (window.pdfjsLib) {
-          const loadingTask = window.pdfjsLib.getDocument({ data: typedarray });
-          const doc = await loadingTask.promise;
-          setPdfDoc(doc);
-          setNumPages(doc.numPages);
-          setPageNum(1);
-          setStatusMessage('');
-        } else {
-          alert('El motor PDF.js está inicializándose. Por favor intenta de nuevo en unos segundos.');
-        }
-      } catch (err) {
-        console.error('[PDFViewer] Error al abrir el PDF local:', err);
-        alert('No fue posible abrir el documento seleccionado. Verifique que no esté corrupto o protegido.');
-      } finally {
-        setLoading(false);
-      }
+    fileReader.onload = function () {
+      const typedarray = new Uint8Array(this.result);
+      loadPdfFromUint8Array(typedarray, file.name);
+    };
+    fileReader.onerror = function () {
+      setLoading(false);
+      alert('Error al leer el archivo desde el dispositivo.');
     };
     fileReader.readAsArrayBuffer(file);
   };
@@ -627,20 +668,19 @@ export default function PDFViewer() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileUpload}
-            accept=".pdf,application/pdf"
-            className="hidden"
+            accept="application/pdf,.pdf,application/x-pdf"
+            className="sr-only"
             id="pdfFileInput"
             aria-label="Seleccionar archivo PDF local"
           />
-          <button
-            onClick={() => fileInputRef.current && fileInputRef.current.click()}
-            className="accent px-3 py-2 rounded-lg flex items-center gap-1.5 text-sm font-semibold shadow-md hover:opacity-90 transition-opacity"
+          <label
+            htmlFor="pdfFileInput"
+            className="accent px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs sm:text-sm font-semibold shadow-md hover:opacity-90 transition-opacity cursor-pointer select-none"
             title="Cargar archivo PDF desde el dispositivo"
-            aria-label="Cargar archivo PDF local"
           >
             <span className="material-symbols-outlined text-base" aria-hidden="true">upload_file</span>
-            <span className="hidden sm:inline">Cargar PDF</span>
-          </button>
+            <span>Cargar PDF</span>
+          </label>
         </div>
       </header>
 
@@ -742,7 +782,36 @@ export default function PDFViewer() {
       {/* =====================================================================
           3. ÁREA PRINCIPAL: LIENZO DE RENDERIZADO Y TEXTO ACCESIBLE (RF-001)
           ===================================================================== */}
-      <main className="flex-1 p-4 flex flex-col items-center justify-center overflow-auto" role="main">
+      <main 
+        className="flex-1 p-4 flex flex-col items-center justify-center overflow-auto" 
+        role="main"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          const file = e.dataTransfer.files && e.dataTransfer.files[0];
+          if (file) {
+            handleFileUpload({ target: { files: [file], value: '' } });
+          }
+        }}
+      >
+        {/* Banner de acceso directo y táctil para selección de archivos del dispositivo */}
+        <div className="w-full max-w-3xl mb-3">
+          <label
+            htmlFor="pdfFileInput"
+            className="w-full card p-3 sm:p-3.5 rounded-xl border border-dashed border-indigo-400/40 hover:border-indigo-400 flex items-center justify-between gap-3 cursor-pointer transition-all hover:bg-white/5 select-none"
+          >
+            <div className="flex items-center gap-2.5 sm:gap-3">
+              <span className="material-symbols-outlined text-2xl text-[var(--primary)]" aria-hidden="true">folder_open</span>
+              <div className="text-left">
+                <p className="text-xs sm:text-sm font-semibold">Toca aquí para seleccionar un archivo PDF de tu dispositivo</p>
+                <p className="text-[11px] opacity-65">Accede a tus documentos, libros y descargas locales (.pdf)</p>
+              </div>
+            </div>
+            <span className="surface px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shadow-sm border border-white/10">
+              Examinar
+            </span>
+          </label>
+        </div>
         
         {/* Notificación de carga / estado */}
         {statusMessage && (

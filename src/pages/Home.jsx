@@ -184,6 +184,33 @@ export default function Home() {
     }
   };
 
+  // Manejo de carga de PDF directo desde la pantalla principal
+  const handleHomePdfUpload = (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+      alert('Por favor selecciona un archivo con extensión .pdf');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function () {
+      try {
+        window.__pendingPdfData = {
+          data: new Uint8Array(this.result),
+          name: file.name
+        };
+        navigate('/reader');
+      } catch (err) {
+        console.error('Error al procesar PDF:', err);
+        navigate('/reader');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
   // Accesibilidad: Cerrar modal con Escape
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -274,14 +301,32 @@ export default function Home() {
                 <p className="text-sm opacity-70">Abre y lee documentos PDF con voz</p>
               </div>
             </div>
-            <button 
-              onClick={() => navigate('/reader')}
-              className="w-full accent rounded-full p-2 flex items-center justify-center gap-2"
-              aria-label="Abrir lector de PDF"
-            >
-              <span className="material-symbols-outlined" aria-hidden="true">menu_book</span>
-              Abrir Lector
-            </button>
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              <button 
+                onClick={() => navigate('/reader')}
+                className="flex-1 surface rounded-full p-2.5 flex items-center justify-center gap-2 border border-white/10 hover:bg-white/5 transition-colors font-medium text-sm"
+                aria-label="Abrir lector de PDF"
+              >
+                <span className="material-symbols-outlined" aria-hidden="true">menu_book</span>
+                Abrir Visor
+              </button>
+              <label 
+                htmlFor="homePdfFileInput"
+                className="flex-1 accent rounded-full p-2.5 flex items-center justify-center gap-2 cursor-pointer font-medium text-sm text-center shadow-md hover:opacity-90 transition-opacity select-none"
+                aria-label="Cargar archivo PDF desde tu dispositivo"
+              >
+                <span className="material-symbols-outlined" aria-hidden="true">upload_file</span>
+                Cargar PDF
+              </label>
+              <input
+                id="homePdfFileInput"
+                type="file"
+                accept="application/pdf,.pdf,application/x-pdf"
+                className="sr-only"
+                onChange={handleHomePdfUpload}
+                aria-label="Seleccionar archivo PDF para abrir"
+              />
+            </div>
           </div>
 
           {/* TTS DEMO SECTION */}
